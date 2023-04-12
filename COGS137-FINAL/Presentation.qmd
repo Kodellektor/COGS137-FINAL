@@ -1,0 +1,337 @@
+---
+title: "COGS137 Final Project: Prophet Technical Presentation"
+author: "Raam Chaklashiya, Arturo Torres Jimenez, Sarah Colbath"
+format: revealjs
+editor: visual
+---
+
+## What is Prophet? {style="zoom: 70%"}
+
+-   R package that allows you to forecast future data and trends based off of existing time-series data
+-   Breaks down data into trends, seasonality, and holiday effects
+-   Developed by Core Data Science team at Facebook in 2017
+
+### Advantages
+
+-   Fast, takes very little effort to make accurate forecasts
+-   Forecasts can be manually adjusted to improve accuracy
+-   Largely unaffected by outliers and missing data
+
+### Installation
+
+To install Prophet, you can simply use the \`install.packages()\` function with "prophet" as the argument. Requires the "rstan" dependency.
+
+```{r, eval=FALSE, echo=TRUE}
+install.packages("prophet")
+install.packages("rstan")
+```
+
+## General Outline of Prophet Forecast Creation {style="zoom: 70%"}
+
+This annotated code can be referenced for future slides.
+
+```{r, echo=TRUE, eval=FALSE}
+#This code snippet demonstrates the elementary outline for creating forecasts
+your_df <- read.csv('your_data') # Create your dataframe from your data
+your_model <- prophet(your_df) # Utilize the prophet function to transform your df into a model
+your_future <- make_future_dataframe(your_model, periods = int) #Assign your desired number of periods and transform them into a 'future' utilizing the `make_future_dataframe()` function
+prophet_forecast <- predict(your_model, your_future) # Use the `predict()` function to create your forecast
+plot(your_model, prophet_forecast) # Plot a forecast based on your model utilizing the `plot()` function
+```
+
+## Work Through An Example With Us!
+
+Say you are looking to answer a question that requires you to predict non-linear patterns of future events such as:
+
+-   What will houses cost 2 years from now?
+
+-   When should a business raise or lower prices?
+
+-   When will a bank run out of money if a random increasing amount of individuals begin to withdraw all of their money?
+
+## For our purposes, we will examine the Housing Price Prediction:
+
+To do so we begin by importing the following libraries. The comments explain why we have chosen them.
+
+```{r, echo=TRUE}
+library(rstan)     # Needed Dependency for Prophet
+library(prophet)   # Main library used for forecasting utilizing time series
+library(tidyverse) # Data science management library 
+library(lubridate) # Date time and time span facilitator 
+```
+
+We then proceed to import data corresponding to single family homes for sale.
+
+```{r, echo=TRUE}
+df <- read.csv("data/Monthly_Sale_Price_of_Single_Family_Homes_in_CT.csv")
+```
+
+Source: [Monthly Single-Family Home Sales in CT - Catalog (data.gov)](https://catalog.data.gov/dataset/monthly-single-family-home-sales-in-ct)
+
+## Data Cleaning {style="zoom: 70%"}
+
+\*Column names and format requirements\*
+
+`ds` : Columns of YYYY-MM-DD time format. Can alternatively use H:M:S for data on much smaller timescales.
+
+`y` : Dependent variable, in this case housing prices
+
+```{r, echo=TRUE}
+df <- df |> rename(ds = Date, y = Average.Sale.Price) |> separate(ds, c("Month", "Year")) |>
+  mutate(
+    Month = case_when(
+      Month == "Jan" ~ "1",
+      Month == "Feb" ~ "2",
+      Month == "Mar" ~ "3",
+      Month == "Apr" ~ "4",
+      Month == "May" ~ "5",
+      Month == "Jun" ~ "6",
+      Month == "Jul" ~ "7",
+      Month == "Aug" ~ "8",
+      Month == "Sep" ~ "9",
+      Month == "Oct" ~ "10",
+      Month == "Nov" ~ "11",
+      Month == "Dec" ~ "12"))
+df$ds <- paste(df$Year, df$Month, "01", sep = "-")
+df$ds <- ymd(df$ds) 
+```
+
+## Creating your first model {style="zoom: 70%"}
+
+Separate df into testing and training data
+
+Use prophet(df) with the following optional arguments:
+
+-   `growth` = linear, logistic, or flat trends in data
+-   `changepoints` = list of dates which include changes in slope
+-   `n.changepoints` = if change points above is left empty, this will tell prophet how many change points to select on its own
+-   `monthly`, `weekly`, `yearly.seasonality` = TRUE, FALSE, or 'auto'. The time period of which prophet will attempt to find repeated patterns.
+-   `holidays` = vector of notable holidays separate from the existing pattern
+
+```{r, echo=TRUE}
+df_train <- df |> filter(ds <= as.Date("2016-01-01"))
+df_test <- df
+model <- prophet(df_train, yearly.seasonality = TRUE, n.changepoints = 3)
+```
+
+## Generating Future and Predictions {style="zoom: 70%"}
+
+`make_future_dataframe()` takes several arguments:
+
+-   `model` = the output of prophet() on previous slide
+-   `freq` = 'year', 'month', 'day' the scale of units to predict forward in the future
+-   `periods` = int, the number of units to predict in the future
+
+`predict()` has only two arguments:
+
+1.  model
+2.  prediction
+
+```{r, echo=TRUE}
+prediction <- make_future_dataframe(model, periods = 24, freq='month')
+forecast <- predict(model, prediction)
+head(forecast)
+```
+
+## Finished Result
+
+The thin blue line is our actual mean price, with the blue line past our data being predicted mean price. The blue surrounding that line is the variance and predicted error in our plot.
+
+```{r, fig.width=16, fig.height=10, fig.align='center', echo=TRUE}
+plot(model, forecast)
+```
+
+## Changepoints {style="zoom: 70%"}
+
+Notable points which change the trends in the data. Prophet will auto detect these if no input is given using n.changepoints(# of desired changepoints)
+
+-Input is a list of dates in Y-M-D format
+
+-Avoid using too many changepoints, the goal is to have a \# of changepoints close to the amount of IMPORTANT changes in the original dataset
+
+In our example data here would be a few notable changepoints:
+
+-   Around the 2008 Financial crisis
+-   The end of the crisis and beginning of recovery from it
+-   The start of covid
+
+## Holidays {style="zoom: 70%"}
+
+To consider holidays in the forecast, you need to define a dataframe with the following columns.
+
+-   `holiday` = name of holiday
+-   `ds` = date of holiday in Y-M-D format
+-   `lower_window` (optional) how many days before the holiday will the holiday affect y
+-   `upper_window` (optional) how many days after the holiday will the holiday affect y
+-   `prior scale` (optional) by what magnitude does the holiday affect y
+
+To include the holiday in the model, set the holiday dataframe as the argument for the `holidays` parameter in the `prophet()` function.
+
+```{r, eval=FALSE, echo=TRUE}
+m <- prophet(data, holidays=holiday_df)
+```
+
+## Handling Shocks (S&P500 Stock Data) {style="zoom: 70%"}
+
+Often with time-series data, there can be non-recurring events that cause an extreme fluctuation in the data which can throw off predictions. One notable example is the COVID-19 pandemic, which had a particularly noticeable effect on the stock market. Here, we take a look at the forecast without any adjustments.
+
+::: panel-tabset
+## Code
+
+```{r, echo=TRUE, eval=FALSE}
+sp500 <- read.csv("data/sp500_index.csv")
+sp500 <- sp500 |> rename("ds" = "Date", "y" = "S.P500")
+m <- prophet(sp500)
+future <- make_future_dataframe(m, periods = 365)
+forecast <- predict(m, future)
+plot(m, forecast)
+```
+
+## Plot
+
+```{r, fig.align='center', echo=FALSE}
+sp500 <- read.csv("data/sp500_index.csv")
+sp500 <- sp500 |> rename("ds" = "Date", "y" = "S.P500")
+m <- prophet(sp500)
+future <- make_future_dataframe(m, periods = 365)
+forecast <- predict(m, future)
+plot(m, forecast)
+```
+:::
+
+Source: <https://www.kaggle.com/datasets/andrewmvd/sp-500-stocks>
+
+## Handling Shocks (S&P500 Stock Data) {style="zoom: 70%"}
+
+One approach to handling large fluctuations in the data is to treat them as a non-repeating holiday. We can see that the blue line indicating the mean stock price and the predicted variance for the initial lockdown period is much closer to the actual data in the adjusted forecast.
+
+::: panel-tabset
+## Code
+
+```{r, echo=TRUE, eval=FALSE}
+lockdown <- data.frame('holiday' = c('lockdown'),
+                       'ds' = c("2020-03-21"),
+                       'lower_window' = c(0),
+                       'ds_upper' = c("2022-06-06"),
+                       'upper_window' = c(77))
+m2 <- prophet(sp500, holidays=lockdown)
+future2 <- make_future_dataframe(m2, periods = 365)
+forecast2 <- predict(m2, future2)
+plot(m2, forecast2)
+```
+
+## Plot
+
+```{r, echo=FALSE, fig.align='center'}
+lockdown <- data.frame('holiday' = c('lockdown'),
+                       'ds' = c("2020-03-21"),
+                       'lower_window' = c(0),
+                       'ds_upper' = c("2022-06-06"),
+                       'upper_window' = c(77))
+m2 <- prophet(sp500, holidays=lockdown)
+future2 <- make_future_dataframe(m2, periods = 365)
+forecast2 <- predict(m2, future2)
+plot(m2, forecast2)
+```
+:::
+
+## Handling Shocks (S&P500 Stock Data) {style="zoom: 70%"}
+
+Using the `prophet_plot_components()` function, we can break down the forecast into trend, weekly, and yearly data.
+
+::: columns
+::: {.column width="50%"}
+```{r, eval=FALSE, echo=TRUE}
+prophet_plot_components(m, forecast)
+```
+
+```{r, echo=FALSE, fig.width=8}
+prophet_plot_components(m, forecast)
+```
+:::
+
+::: {.column width="50%"}
+```{r, eval=FALSE, echo=TRUE}
+prophet_plot_components(m2, forecast2)
+```
+
+```{r, echo=FALSE, fig.width=8}
+prophet_plot_components(m2, forecast2)
+```
+:::
+:::
+
+The trend data before the adjustment has a decline after 2020, indicating that the crash caused by COVID-19 is being considered as a trend. After the adjustment, the crash is not being considered in the trend component.
+
+## Uncertainty Intervals {style="zoom: 90%"}
+
+Prophet's forecasts are aware of three sources of uncertainty:
+
+-   Uncertainty in the dataset's trend
+-   Uncertainty generated from seasonality estimates
+-   Uncertainty generated by observational noise
+
+The largest source of uncertainty is of course the dataset's forecasted future trends. However, Prophet is quite adept at detecting and fitting these into a \*similar\* trend as it is natural to assume the dataset will continue without drastic change. (These types of changes are addressed in future slides) After projecting these changes their uncertainty intervals are calculated.
+
+## Coding Uncertainty {style="zoom: 80%"}
+
+The snippet below addresses uncertainty interval coding:
+
+```{r, eval=FALSE, echo=TRUE}
+your_model <- prophet(your_df, interval.width = int_here) # Interval is set at 80% by default
+your_forecast <- predict(your_model, future) # Create forecast utilizing model and the future function
+```
+
+## Outliers
+
+Prophet handles outliers by removing them.
+
+This is mainly done thanks to Prophet's ability to handle missing information coded as `NA`. By removing them and keeping the dates of the removed values will allow for predictions to be applied with predictions for their variables.
+
+## Outlier Assignment Code {style="zoom: 80%"}
+
+To remove outliers utilize the following code snippets:
+
+```{r, eval=FALSE, echo=TRUE}
+outliers <- (as.Date(df$ds) > as.Date('YYYY-MM-DD')) # establish the outliers and their dates
+your_df$y[outliers] = NA # define them to have a 'missing value' and then create a column called 'outliers'
+```
+
+## Diagnostics {style="zoom: 70%"}
+
+Prophet can utilize historical data to measure and correct its own forecast errors. Essentially, by utilizing debugging methods, prophet can increase it's accuracy. By creating cutoff points and then comparing the forecasted values with the actual values we can train the model.
+
+We call this cross validation, which has its own function \`cross_validation()\`, This function takes in the arguments \`horizon\`, \`initial\`, and \`period\`. Which creates the forecasted horizon, that can be constricted by the initial training period with arbitrary spacing between the constraints.
+
+Shown as below:
+
+```{r, eval=FALSE, echo=TRUE}
+yourdf.cv <- cross_validation(your_model, initial = 730, period = 180, horizon = 365, units = 'days') #Keep in mind `units` will only be accepted if also accepted by `as.difftime`
+```
+
+```{r, eval=FALSE, echo=TRUE}
+your_cutoffs <- as.Date(c('YYYY-MM-DD', 'YYYY-MM-DD', 'YYYY-MM-DD'))
+your_df.cv2 <- cross_validation(your_model, cutoffs = your_cutoffs, horizon = 365, units = 'days')# The method `cutoffs` can also be set to a variable that is a list in the accepted datetime format
+```
+
+## Coding Diagnostics {style="zoom: 70%"}
+
+Furthermore when there is a surplus of metrics required, the function \`performance_metrics()\` can be called the following way:
+
+```{r, eval=FALSE, echo=TRUE}
+your_df.p <- performance_metrics(your_df.cv)
+```
+
+Calling this function will produce the following columns in addition to those above:
+
+-   MSE: Mean Squared Error
+-   RMSE: Root Mean Squared Error
+-   MAE: Mean Absolute Error
+-   MAPE: Mean Absolute Percent Error
+-   MDAPE: Median Absolute Percent Error
+
+These metrics can then be visualized with the function \`plot_cross_validation_metric()\`:
+
+```{r, eval=FALSE, echo=TRUE}
+plot_cross_validation_metric(your_df.cv, metric = 'mape') #Here we are showing you can choose an individual metric
+```
